@@ -83,6 +83,8 @@ export interface AnalysisRun {
   platformConfidence?: string
   startedAt?: string
   completedAt?: string
+  components?: CommerceComponent[]
+  mappings?: PlugoMapping[]
 }
 
 export interface CommerceComponent {
