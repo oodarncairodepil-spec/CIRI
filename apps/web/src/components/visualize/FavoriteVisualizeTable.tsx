@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { FavoritePage } from '@/hooks/useFavoritePages'
 import { useVisualizePage, PHASE_LABEL } from '@/hooks/useVisualizePage'
+import { useAiRecreate } from '@/hooks/useAiRecreate'
 
 export function matchTone(pct: number) {
   if (pct >= 99) return 'bg-green-100 text-green-700'
@@ -10,6 +11,7 @@ export function matchTone(pct: number) {
 
 function FavoriteRow({ page, projectId }: { page: FavoritePage; projectId: string }) {
   const { status, error, isRunning, run } = useVisualizePage(projectId, page.displayId)
+  const aiRecreate = useAiRecreate(projectId, page.displayId)
   const fidelity = status?.fidelity
   const path = (() => {
     try { return new URL(page.url).pathname || '/' } catch { return '/' }
@@ -63,7 +65,16 @@ function FavoriteRow({ page, projectId }: { page: FavoritePage; projectId: strin
           disabled={isRunning || Boolean(error)}
           className="inline-flex items-center rounded px-2.5 py-1 text-xs font-medium bg-violet-100 text-violet-700 hover:bg-violet-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {fidelity ? 'Re-check' : 'Visualize'}
+          {fidelity ? 'Re-visualize' : 'Check fidelity'}
+        </button>
+        <button
+          onClick={() => aiRecreate.run()}
+          disabled={aiRecreate.isRunning || !aiRecreate.hasSnapshot}
+          className="ml-1.5 inline-flex items-center rounded px-2.5 py-1 text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {aiRecreate.isRunning
+            ? <><span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse mr-1" />Recreating…</>
+            : aiRecreate.hasResult ? 'Re-generate AI' : 'AI Recreate'}
         </button>
       </td>
     </tr>
