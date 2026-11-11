@@ -342,6 +342,7 @@ const TYPE_BY_EXT = {
 const assetIndexes = {}   // projectId → { [absoluteUrl]: fileName }
 const visualizeJobs = {}  // `${projectId}/${internalPageId}` → { status, phase, error }
 const buildJobs = {}      // `${projectId}/${displayId}` → { status, error }
+const aiRecreateJobs = {}  // `${projectId}/${displayId}` → { status, phase, error }
 
 function splitDomIntoSections(domJson, maxKb = 40) {
   const body = domJson[0]  // domJson is [{tag:'body', children:[...]}]
@@ -1056,6 +1057,104 @@ async function buildPageLocal(proj, page) {
     buildJobs[jobKey] = { status: 'failed', error: err.message }
   }
   return getBuildStatus(proj, page)
+}
+
+// ── AI Page Recreation ────────────────────────────────────────────────────────
+function getAiRecreateStatus(proj, page) {
+  const internalId = page.internalId || page.id
+  const pd = join(projectDiskPath(proj), 'pages', internalId)
+  const job = aiRecreateJobs[`${proj.id}/${page.displayId}`] ?? {}
+  return {
+    pageId: page.displayId,
+    url: page.url,
+    hasSnapshot: existsSync(join(pd, 'snapshot.html')),
+    hasResult: existsSync(join(pd, 'ai-recreation.html')),
+    status: job.status ?? 'idle',
+    phase: job.phase,
+    error: job.error,
+  }
+}
+
+async function aiRecreatePage(proj, page) {
+  const jobKey = `${proj.id}/${page.displayId}`
+  if (aiRecreateJobs[jobKey]?.status === 'running') return
+  const job = aiRecreateJobs[jobKey] = { status: 'running', phase: 'starting' }
+  const internalId = page.internalId || page.id
+  const pd = join(projectDiskPath(proj), 'pages', internalId)
+
+  try {
+    const settings = envToSettings(readEnvFile())
+
+    // Load crawl data
+    const domJson = loadJson(join(pd, 'dom.json'), [])
+    const stylesJson = loadJson(join(pd, 'styles.json'), {})
+    const intelligenceJson = loadJson(join(projectDiskPath(proj), 'intelligence.json'), null)
+    const screenshotBuf = existsSync(join(pd, 'screenshot-desktop.jpg'))
+      ? readFileSync(join(pd, 'screenshot-desktop.jpg'))
+      : null
+    const screenshotBase64 = screenshotBuf ? screenshotBuf.toString('base64') : null
+
+    if (!domJson.length) throw new Error('No DOM data for this page — crawl it first')
+
+    const sections = splitDomIntoSections(domJson)
+    const sectionFragments = []
+
+    for (let i = 0; i < sections.length; i++) {
+      job.phase = `section ${i + 1}/${sections.length}`
+      const isFirst = i === 0
+      const textContent = buildAiPrompt({
+        section: sections[i], sectionIndex: i, totalSections: sections.length,
+        stylesJson, intelligenceJson, isFirst,
+      })
+
+      let messages
+      if (isFirst && screenshotBase64) {
+        // First section: include the full-page screenshot for visual reference
+        const imageContent = settings.activeAI === 'openai'
+          ? { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${screenshotBase64}`, detail: 'high' } }
+          : { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: screenshotBase64 } }
+        messages = [{ role: 'user', content: [imageContent, { type: 'text', text: textContent }] }]
+      } else {
+        messages = [{ role: 'user', content: textContent }]
+      }
+
+      const fragment = await callAI(settings, messages)
+      // Strip any stray markdown fences the AI might wrap the HTML in
+      sectionFragments.push(fragment.replace(/^```html?\n?/i, '').replace(/\n?```\s*$/i, '').trim())
+    }
+
+    // Assemble final document
+    job.phase = 'assembling'
+    const intel = intelligenceJson ?? {}
+    const fontImports = intel.designKit?.fonts?.length
+      ? `<!-- fonts from original page -->`
+      : ''
+    const finalHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${page.url}</title>
+  ${fontImports}
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 0; }
+  </style>
+</head>
+<body>
+${sectionFragments.map(f => `<!-- section -->\n${f}`).join('\n\n')}
+</body>
+</html>`
+
+    writeFileSync(join(pd, 'ai-recreation.html'), finalHtml, 'utf8')
+    job.status = 'completed'
+    job.phase = undefined
+    console.log(`[ai-recreate] ${page.url} — ${sections.length} sections assembled`)
+  } catch (err) {
+    console.error(`[ai-recreate] failed for ${page.url}:`, err)
+    job.status = 'failed'
+    job.error = err.message
+  }
 }
 
 // ── Real crawler ──────────────────────────────────────────────────────────────
