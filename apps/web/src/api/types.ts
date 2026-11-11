@@ -121,3 +121,13 @@ export interface Blueprint {
   createdAt: string
   completedAt?: string
 }
+
+export interface AiRecreateStatus {
+  pageId: string
+  url: string
+  hasSnapshot: boolean
+  hasResult: boolean
+  status: 'idle' | 'running' | 'completed' | 'failed'
+  phase?: string
+  error?: string
+}
