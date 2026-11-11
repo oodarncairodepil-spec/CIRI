@@ -343,6 +343,91 @@ const assetIndexes = {}   // projectId → { [absoluteUrl]: fileName }
 const visualizeJobs = {}  // `${projectId}/${internalPageId}` → { status, phase, error }
 const buildJobs = {}      // `${projectId}/${displayId}` → { status, error }
 
+function splitDomIntoSections(domJson, maxKb = 40) {
+  const body = domJson[0]  // domJson is [{tag:'body', children:[...]}]
+  if (!body?.children?.length) return [[body ?? { tag: 'body', children: [] }]]
+  const maxBytes = maxKb * 1024
+  const sections = []
+  let current = []
+  let currentSize = 0
+  for (const child of body.children) {
+    const childSize = JSON.stringify(child).length
+    if (current.length > 0 && currentSize + childSize > maxBytes) {
+      sections.push(current)
+      current = []
+      currentSize = 0
+    }
+    // Single child exceeds limit — push it alone anyway (AI can handle it)
+    current.push(child)
+    currentSize += childSize
+  }
+  if (current.length > 0) sections.push(current)
+  return sections
+}
+
+function buildAiPrompt({ section, sectionIndex, totalSections, stylesJson, intelligenceJson, isFirst }) {
+  const domStr = JSON.stringify(section, null, 2)
+  const stylesStr = JSON.stringify(stylesJson ?? {}, null, 2)
+  const intel = intelligenceJson ?? {}
+  const brandColors = intel.brandColors ? `Brand colors: ${intel.brandColors.join(', ')}.` : ''
+  const fonts = intel.designKit?.fonts?.length ? `Fonts: ${intel.designKit.fonts.join(', ')}.` : ''
+  const typeScale = intel.designKit?.typeScale?.length
+    ? `Type scale:\n${intel.designKit.typeScale.map(t => `  ${t.role}: ${t.fontFamily} ${t.fontSize} ${t.fontWeight}`).join('\n')}`
+    : ''
+
+  const intro = isFirst
+    ? `You are recreating a webpage section by section to produce clean, deployable HTML/CSS.
+I will provide you with the original page screenshot and the DOM JSON for each section.
+Produce only the HTML fragment for the requested section — no <!DOCTYPE>, no <html>, no <head>, no <body> tags.
+Use inline <style> blocks or inline styles only — no external stylesheets.
+Match the visual appearance of the original as closely as possible.
+
+${brandColors}
+${fonts}
+${typeScale}
+Computed styles reference:\n${stylesStr}
+
+`
+    : ''
+
+  return `${intro}Section ${sectionIndex + 1} of ${totalSections}.
+
+DOM JSON for this section:
+\`\`\`json
+${domStr}
+\`\`\`
+
+Reproduce this section as a visually accurate HTML fragment. Output ONLY the HTML. No explanations.`
+}
+
+async function callAI(settings, messages) {
+  if (settings.activeAI === 'openai') {
+    if (!settings.openaiApiKey) throw new Error('No OpenAI API key configured — set it in Settings')
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.openaiApiKey}` },
+      body: JSON.stringify({ model: settings.openaiModel ?? 'gpt-4o', messages }),
+    })
+    if (!res.ok) {
+      const err = await res.text()
+      throw new Error(`OpenAI API error ${res.status}: ${err.slice(0, 300)}`)
+    }
+    const data = await res.json()
+    return data.choices[0].message.content
+  } else {
+    // Claude (default)
+    if (!settings.anthropicApiKey) throw new Error('No Anthropic API key configured — set it in Settings')
+    const { default: Anthropic } = await import('@anthropic-ai/sdk')
+    const client = new Anthropic({ apiKey: settings.anthropicApiKey })
+    const res = await client.messages.create({
+      model: settings.claudeModel ?? 'claude-sonnet-5-5',
+      max_tokens: 4096,
+      messages,
+    })
+    return res.content[0].type === 'text' ? res.content[0].text : ''
+  }
+}
+
 function assetsDir(proj) { return join(projectDiskPath(proj), 'assets') }
 
 function getAssetIndex(proj) {
