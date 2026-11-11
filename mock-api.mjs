@@ -1,9 +1,11 @@
 // Real-crawl dev API server — uses Playwright to actually visit pages
 import { createServer } from 'http'
 import { chromium } from 'playwright'
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, statSync, createReadStream } from 'fs'
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, statSync, createReadStream, unlinkSync } from 'fs'
 import { createHash } from 'crypto'
 import { join } from 'path'
+import { execFileSync } from 'child_process'
+import { tmpdir } from 'os'
 
 const DATA_DIR = join(import.meta.dirname, 'crawl-data')
 mkdirSync(DATA_DIR, { recursive: true })
@@ -1089,9 +1091,26 @@ async function aiRecreatePage(proj, page) {
     const domJson = loadJson(join(pd, 'dom.json'), [])
     const stylesJson = loadJson(join(pd, 'styles.json'), {})
     const intelligenceJson = loadJson(join(projectDiskPath(proj), 'intelligence.json'), null)
-    const screenshotBuf = existsSync(join(pd, 'screenshot-desktop.jpg'))
+    let screenshotBuf = existsSync(join(pd, 'screenshot-desktop.jpg'))
       ? readFileSync(join(pd, 'screenshot-desktop.jpg'))
       : null
+    // Downscale tall screenshots: Claude rejects images > ~8000px per side;
+    // even when accepted a 1440×9000 image shrinks to ~250px wide — useless as reference.
+    // sips (macOS built-in) caps the longest side at 1500px with no quality loss.
+    if (screenshotBuf) {
+      try {
+        const stamp = Date.now()
+        const tmpIn = join(tmpdir(), `ai-rec-${stamp}-in.jpg`)
+        const tmpOut = join(tmpdir(), `ai-rec-${stamp}-out.jpg`)
+        writeFileSync(tmpIn, screenshotBuf)
+        execFileSync('sips', ['-Z', '1500', tmpIn, '--out', tmpOut], { stdio: 'pipe' })
+        screenshotBuf = readFileSync(tmpOut)
+        unlinkSync(tmpIn)
+        unlinkSync(tmpOut)
+      } catch {
+        // sips unavailable or failed — send original (may hit AI size limits on tall pages)
+      }
+    }
     const screenshotBase64 = screenshotBuf ? screenshotBuf.toString('base64') : null
 
     if (!domJson.length) throw new Error('No DOM data for this page — crawl it first')
@@ -1142,7 +1161,7 @@ async function aiRecreatePage(proj, page) {
   </style>
 </head>
 <body>
-${sectionFragments.map(f => `<!-- section -->\n${f}`).join('\n\n')}
+${sectionFragments.map(f => `<div data-ai-section>\n${f}\n</div>`).join('\n\n')}
 </body>
 </html>`
 

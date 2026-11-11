@@ -184,6 +184,10 @@ export function PagePreviewPage() {
             <p className="py-16 text-center text-sm text-gray-400">
               Generating AI recreation: {aiRecreate.status?.phase ?? 'starting'}…
             </p>
+          ) : aiRecreate.status?.status === 'failed' ? (
+            <p className="py-16 text-center text-sm text-red-400">
+              AI recreation failed: {aiRecreate.status.error ?? 'unknown error'}
+            </p>
           ) : aiRecreate.hasResult ? (
             <iframe
               key={aiOutputUrl}

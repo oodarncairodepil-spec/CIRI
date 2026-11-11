@@ -67,6 +67,11 @@ function FavoriteRow({ page, projectId }: { page: FavoritePage; projectId: strin
         >
           {fidelity ? 'Re-visualize' : 'Check fidelity'}
         </button>
+        {aiRecreate.status?.status === 'failed' && (
+          <span className="ml-1.5 text-xs text-red-600" title={aiRecreate.status.error}>
+            AI failed
+          </span>
+        )}
         <button
           onClick={() => aiRecreate.run()}
           disabled={aiRecreate.isRunning || !aiRecreate.hasSnapshot}
