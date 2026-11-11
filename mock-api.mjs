@@ -2653,10 +2653,10 @@ const server = createServer(async (req, res) => {
     }
 
     if (sub === 'ai-recreate') {
-      if (method === 'GET') {
+      if (req.method === 'GET') {
         return json(res, getAiRecreateStatus(proj, page))
-      } else if (method === 'POST') {
-        aiRecreatePage(proj, page)  // fire and forget — do NOT await
+      } else if (req.method === 'POST') {
+        aiRecreatePage(proj, page).catch(err => console.error('[ai-recreate] unhandled:', err))
         return json(res, getAiRecreateStatus(proj, page))
       }
       return json(res, { error: 'Method not allowed' }, 405)
