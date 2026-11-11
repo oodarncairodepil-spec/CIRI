@@ -2652,6 +2652,25 @@ const server = createServer(async (req, res) => {
       res.end(readFileSync(buildPath)); return
     }
 
+    if (sub === 'ai-recreate') {
+      if (method === 'GET') {
+        return json(res, getAiRecreateStatus(proj, page))
+      } else if (method === 'POST') {
+        aiRecreatePage(proj, page)  // fire and forget — do NOT await
+        return json(res, getAiRecreateStatus(proj, page))
+      }
+      return json(res, { error: 'Method not allowed' }, 405)
+    }
+
+    if (sub === 'ai-recreation-output') {
+      const internalId = page.internalId || page.id
+      const filePath = join(projectDiskPath(proj), 'pages', internalId, 'ai-recreation.html')
+      if (!existsSync(filePath)) return json(res, { error: 'AI recreation not yet generated' }, 404)
+      const content = readFileSync(filePath, 'utf8')
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' })
+      return res.end(content)
+    }
+
     const cmpMatch = sub.match(/^(clone-screenshot|diff)\/(desktop|mobile)$/)
     if (cmpMatch) {
       const name = `${cmpMatch[1] === 'diff' ? 'diff' : 'clone'}-${cmpMatch[2]}.jpg`
