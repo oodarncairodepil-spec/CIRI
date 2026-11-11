@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useVisualizePage, pageApiUrl, PHASE_LABEL } from '@/hooks/useVisualizePage'
 import { matchTone } from '@/components/visualize/FavoriteVisualizeTable'
+import { useAiRecreate, aiRecreationOutputUrl } from '@/hooks/useAiRecreate'
 
-type View = 'clone' | 'original' | 'side' | 'diff'
+type View = 'clone' | 'original' | 'side' | 'diff' | 'ai'
 type Device = 'desktop' | 'mobile'
 
 const VIEWS: { id: View; label: string }[] = [
@@ -11,6 +12,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: 'original', label: 'Original' },
   { id: 'side', label: 'Side by side' },
   { id: 'diff', label: 'Differences' },
+  { id: 'ai', label: 'AI Recreation' },
 ]
 
 function Segmented<T extends string>({ value, options, onChange }: {
@@ -51,6 +53,8 @@ export function PagePreviewPage() {
   const [view, setView] = useState<View>('clone')
   const [device, setDevice] = useState<Device>('desktop')
   const { status, error, isRunning, run } = useVisualizePage(id, displayId)
+  const aiRecreate = useAiRecreate(id, displayId)
+  const aiOutputUrl = aiRecreationOutputUrl(id, displayId)
 
   const fidelity = status?.fidelity
   const stamp = fidelity?.checkedAt ?? ''
@@ -97,6 +101,16 @@ export function PagePreviewPage() {
           </span>
         ) : (
           <span className="text-xs text-gray-500">Not compared with the original yet</span>
+        )}
+
+        {aiRecreate.isRunning && (
+          <span className="inline-flex items-center gap-1 text-xs text-amber-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+            AI: {aiRecreate.status?.phase ?? 'starting'}…
+          </span>
+        )}
+        {!aiRecreate.isRunning && aiRecreate.hasResult && (
+          <span className="text-xs text-amber-500">✓ AI recreation ready</span>
         )}
 
         <Segmented value={view} options={VIEWS} onChange={setView} />
@@ -164,6 +178,26 @@ export function PagePreviewPage() {
               width={width}
             />
           </div>
+        )}
+        {view === 'ai' && (
+          aiRecreate.isRunning ? (
+            <p className="py-16 text-center text-sm text-gray-400">
+              Generating AI recreation: {aiRecreate.status?.phase ?? 'starting'}…
+            </p>
+          ) : aiRecreate.hasResult ? (
+            <iframe
+              key={aiOutputUrl}
+              src={aiOutputUrl}
+              title="AI Recreation"
+              sandbox="allow-same-origin allow-scripts"
+              className="block h-full border-0 bg-white mx-auto"
+              style={{ width: device === 'desktop' ? '100%' : 390 }}
+            />
+          ) : (
+            <p className="py-16 text-center text-sm text-gray-400">
+              No AI recreation yet — open the Visualize card, go to Favorites, and click "AI Recreate".
+            </p>
+          )
         )}
       </div>
     </div>
